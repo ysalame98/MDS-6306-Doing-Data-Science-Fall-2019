@@ -1,0 +1,335 @@
+---
+title: "Project 1 EDA"
+author: "Alex Salamah"
+date: "10/9/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# This is the code for the EDA deliverable for MSDS Project 1.
+## Load needed libraries for project
+```{r }
+# Visualization
+library(ggplot2)
+library(maps)
+
+library(mapproj)
+library(plyr)
+library(plotly)
+# classification and modeling
+library(class)
+library(e1071)
+library(caret)
+library(knitr)
+library(tm)
+# data exploration and wrangling 
+library(tidyverse)
+library(readr)
+library(skimr)
+library(stringr)
+#install.packages("skimr")
+#devtools::install_github("ropensci/visdat")
+#devtools::install_github("alastairrushworth/inspectdf")
+library(devtools)
+library(dplyr)
+library(visdat)
+library(inspectdf)
+library(sqldf)
+```
+## Read each Data file interactively
+```{r}
+# read files interactively
+BrewriesDF <- read.csv(file.choose(), header = TRUE) 
+BeersDF <- read.csv(file.choose(), header = TRUE)
+```
+## EDA Initial Data Profiling
+```{r}
+#look at the first 10 lines of each Data sets
+head(BrewriesDF, 10)
+head(BeersDF,10)
+glimpse(BrewriesDF)
+glimpse(BeersDF)
+#explore missing values
+skim(BrewriesDF)
+skim(BeersDF)
+#Visualize Metadata
+# vis_dat(BeersDF)
+# vis_miss(BeersDF)
+# vis_expect(BeersDF, ~.x =="N/A")
+# vis_dat(BrewriesDF)
+# vis_miss(BrewriesDF)
+
+# Column types
+# Using the inspectdf library
+Types <- inspect_types(BeersDF)
+Types <- inspect_types(BrewriesDF)
+show_plot (Types)
+
+# Missing Bar Plots
+Nas1 <- inspect_na(BeersDF)
+Nas2 <- inspect_na(BrewriesDF)
+show_plot(Nas1, )
+show_plot(Nas2, )
+
+#Categorical Plot
+Catg1 <- inspect_cat(BeersDF)
+show_plot (Catg1)
+Catg2 <- inspect_cat(BrewriesDF)
+show_plot (Catg2)
+#Correlations
+Corl <- inspect_cor(BeersDF)
+show_plot (Corl)
+
+# Distribution of the numeric variables
+Numv <- inspect_num(BeersDF)
+show_plot(Numv)
+
+#Feature Imbalance
+Imb <- inspect_imb(BeersDF)
+show_plot (Imb)
+
+```
+
+## Data Cleansing Breweries Data Set
+```{r}
+# get a unique list of values from city and state
+Brewcity<- sqldf('select distinct(City), State from BrewriesDF order by City, State')
+#Browsing thru the data found two issues in the city name Menominee.  Need to change to Menominie and St Paul to St, Paul
+BrewriesDF$City = str_replace_all(BrewriesDF$City, "St Paul", "St. Paul") 
+BrewriesDF$City = str_replace_all(BrewriesDF$City, "Menominee", "Menominie") 
+skim(BrewriesDF)
+```
+
+## Q1. How many breweries are present in each state?
+```{r}
+  # Block of Code to Generate Heat Map
+  # create a datafarme with state Abbreviation and names
+  lookup = data.frame(abb=state.abb, state= state.name )
+  View(lookup)
+  View(BrewriesDF)
+  #rename column state to abb
+  colnames(BrewriesDF)[4] = "abb"
+  # create a new data set with BrewriesDF and lookup data
+  BrewriesDF1 = merge(BrewriesDF,lookup,"abb")
+  View(BrewriesDF1)
+  # count # of sate in Acu2 data frame
+  BrewriesMPD= count(BrewriesDF1,"state")
+  View(BrewriesMPD)
+  # Change the name of the count column to AcuSpikes
+  colnames(BrewriesMPD)[2] = "BrewriesCnt"
+  #change the names of the states to lower case.  
+  BrewriesMPD$region <- tolower(BrewriesMPD$state)
+  # get the longi/lat of the states in order to draw the map
+  states <- map_data("state")
+  View(states)
+  #merge the states long/lat data with AcuMap data
+  map.df <- left_join(states,BrewriesMPD, by = "region")
+  View(map.df)
+  # Plot the data on map
+  ggplot(map.df, aes(long, lat, group = group))+
+    geom_polygon(aes(fill = BrewriesCnt), stat= "identity", color = "white")+
+     #geom_text(aes(label = BrewriesMPD$count, )) +
+    scale_fill_gradientn (colours= (heat.colors(3)),na.value="grey90")+
+     ggtitle( "Breweries by State", subtitle = "Geopositional Analysis")
+# End of Block to Generate Heat Map
+
+## Block of cose to generate Buble Chart 
+# libraries
+library(packcircles)
+library(ggplot2)
+library(viridis)
+library(ggiraph)
+data <- data.frame(group= paste(BrewriesMPD$state), value= (BrewriesMPD$BrewriesCnt) ) 
+# Add a column with the text to display withing each bubble:
+#data$text <- paste("name: ",data$group, "\n", "value:", data$value, "\n", "You can add a story here!")
+data$text <- paste(data$group,":","\n", data$value)
+View(data)
+# Generate the layout
+packing <- circleProgressiveLayout(data$value, sizetype='area')
+data <- cbind(data, packing)
+dat.gg <- circleLayoutVertices(packing, npoints=50)
+
+# Make the plot :
+ggplot() + 
+  geom_polygon_interactive(data = dat.gg, aes(x, y, group = id, fill=id , tooltip = data$text[id], data_id = id), colour = "black", alpha = 0.6) +
+  scale_fill_viridis() +
+  geom_text(data = data, aes(x, y, label = gsub("Group_", "", text)), size=2, color="black") +
+  ggtitle("Breweries Count By State") +
+  theme_void() + 
+  theme(legend.position="none", plot.margin=unit(c(0,0,0,0),"cm") ) + 
+  coord_equal()
+
+## End of Block
+
+
+#
+# states_map <- map_data("state")
+# 
+# 
+# brewry_map <- left_join(states_map,BrewriesDF2 , by = "region")
+# ggplot(brewry_map, aes(long, lat, group = group))+
+#   geom_polygon(aes(fill = AcuSpikes), color = "white")+
+#   scale_fill_gradientn (colours= (heat.colors(3)),na.value="grey90")+
+#   ggtitle("Breweries by State")
+#  scale_fill_viridis_c(option = "C")
+```
+## Q2. Merge beer data with the breweries data.
+## Print the first 6 observations and the last six observations to check the merged file.  
+## (RMD only, this does not need to be included in the presentation or the deck.)
+```{r}
+mergeDF <- merge(BeersDF, BrewriesDF, by.x = "Brewery_id", by.y = "Brew_ID")
+View(mergeDF)
+skim(mergeDF)
+# Correct the Names of the Namex columns
+colnames(mergeDF)[2] = "Beer_name"
+colnames(mergeDF)[8] = "Brewery_name"
+#Print the 1st and last six observation
+print("1st six observations of the merged data")
+head(mergeDF,6)
+print("last six observations of the merged data")
+tail(mergeDF,6)
+```
+## Q3 Address the missing values in each column.
+## Data Cleansing Beers Data Set
+```{r}
+# Vue list of uniqure city/states
+BeersDF$ABV = as.numeric(str_replace_na(BeersDF$ABV, replacement =  "0.06"))
+# Replace NA with median value of IBU found to be 42.71 from the skim function above
+BeersDF$IBU = as.numeric(str_replace_na(BeersDF$IBU, replacement =  "42.71"))
+```
+#Q4 Compute the median alcohol content(ABV) and international bitterness unit (IBU) for each state. Plot a bar chart to compare.
+```{r}
+#Compute Means of ABV and IBU by State
+# another method
+#temp = aggregate(list(score = mergeDF$ABV), list(state = factor(mergeDF$State)), mean)
+#View(temp)
+#ggplot(temp, aes(x=state, y=score)) + geom_bar()
+###
+StateMeans <- ddply(mergeDF,~State,summarise,meanABV=mean(ABV),meanIBU=mean(IBU))
+View(StateMeans)
+# mean of means
+skim(StateMeans)
+mean(StateMeans$meanABV)
+StateMeans %>% ggplot(aes(y=meanABV)) + geom_boxplot(fill="skyblue") + ggtitle("ABV Median Across All Sates") + ylab("Average Mean")
+StateMeans %>% ggplot(aes(y=meanABV)) + geom_histogram(fill="skyblue") + ggtitle("ABV Median in States")
+# Bar Plot Mean ABV by State
+ggplot(mergeDF, aes(x=State, y=ABV,fill=State)) + 
+  stat_summary(fun.y="mean", geom="bar") +
+     ggtitle("ABV Median in States")
+# Bar Plot Mean IBU by State
+ggplot(mergeDF, aes(x=State, y=IBU,fill=State)) + 
+  stat_summary(fun.y="mean", geom="bar") +
+     ggtitle("IBU Median in States")
+#ggplot(mergeDF, aes(x=State, y=ABV,fill=State)) + geom_boxplot(color = "black")
+```
+## Q5. Which state has the maximum alcoholic (ABV) beer? Which state has the most bitter (IBU) beer?
+```{r}
+# Max ABV State
+ as.character( StateMeans[which.max (StateMeans$meanABV),1] )
+# Min ABV state 
+as.character( StateMeans[which.min (StateMeans$meanABV),1] )
+#Max IBU State 
+as.character(StateMeans[which.max (StateMeans$meanIBU),1] )
+# Min IBU State
+as.character(StateMeans[which.min (StateMeans$meanIBU),1] )
+```
+## Q6. Comment on the summary statistics and distribution of the ABV variable.
+```{r}
+#BoxPlot
+library(gridExtra)
+ggplot(data=mergeDF,mapping=aes(y=ABV)) + geom_boxplot(fill="skyblue")  + ggtitle("ABV Median in all States") + stat_boxplot(geom = "errorbar", width = 0.2) +  ylab ("Alcohol By Volume")
+
+#Histogram
+mergeDF %>% ggplot(aes(x=ABV)) + geom_histogram(fill="blue", color="black") + ggtitle("Number of ABV levels") + xlab("Alcohol By Volume") + ylab("Frequency of Occurrence- Count")
+```
+## Q#7 Is there an apparent relationship between the bitterness of the beer and its alcoholic content? Draw a scatter plot.  Make your best judgment of a relationship and EXPLAIN your answer.
+```{r}
+#Correlations
+Corl <- inspect_cor(mergeDF)
+show_plot (Corl) + ggtitle("Correlation Between All Attributes")
+# Sctter Plot
+mergeDF %>% ggplot(aes(x=IBU, y=ABV)) + geom_point(aes(color=State), size=1, position="jitter") + geom_smooth()
+```
+##Q8 Budweiser would also like to investigate the difference with respect to IBU and ABV between IPAs (India Pale Ales) and other types of Ale (any beer with “Ale” in its name other than IPA).  You decide to use KNN clustering to investigate this relationship.  Provide statistical evidence one way or the other. You can of course assume your audience is comfortable with percentages … KNN is very easy to understand.
+### Step 1 Prepare the data to be used
+```{r}
+# Categorize the type of beer either IPA or Other
+# Use the Beer_Name or Style to decide. Selection Creteria is as follows:
+# if either the Name of the Beer or the Sytle has IPA in it the Beera will be categorized as "IPA" elese, it will be categorized as "Other"
+# 1st let's Backup our data Frame that will used in the model
+Beer.merge.knn<-mergeDF
+# Ues Str_detect function to find IPA in the name.  the regex is called so that
+# we can ignore the case of the string
+Beer.merge.knn$IPA_Ale <- ifelse(
+  str_detect(mergeDF1$Style, regex("IPA", ignore_case = TRUE))  | 
+    str_detect(
+             mergeDF1$Beer_name, regex("IPA", ignore_case =TRUE)
+             )
+             ,"IPA","Ale")
+
+# Validate results using SQL
+# this query should return zero count and it does
+S
+
+sqldf("select count(*) from Beer.merge.knn
+      where IPA_Ale='Other' and 
+      (upper(Beer_name)  like'%IPA%' or
+             upper(Style)  like'%IPA%')")
+# this query should return zero count and it does
+sqldf("select count(*) from Beer.merge.knn
+       where IPA_Ale='IPA' and 
+       (upper(Beer_name) not like'%IPA%' and
+              upper(Style) not like'%IPA%')")
+View(Beer.merge.knn)
+```
+### Step 2 Create KNN model and fit
+```{r}
+splitPerc = .80
+# Number of sample so generate
+iterations = 50
+# Try different values of k to select the optimal value/number of nearst neighbors 
+numks = 30
+# Create Matrix to hold the data with size of iterations X numks 
+masterAcc = matrix(nrow = iterations, ncol = numks)
+  
+for(j in 1:iterations)
+{
+#  accs = data.frame(accuracy = numeric(30), k = numeric(30))
+  trainIndices = sample(1:dim(Beer.merge.knn)[1],round(splitPerc * dim(Beer.merge.knn)[1]))
+  train = Beer.merge.knn[trainIndices,]
+  test = Beer.merge.knn[-trainIndices,]
+  for(i in 1:numks)
+    {
+    #runn classifications using different values of Ks
+    classifications = knn(train[,c(4,5)],test[,c(4,5)],train$IPA_Ale, prob = TRUE, k = i)
+    table(classifications,test$IPA_Ale)
+    CM = confusionMatrix(table(classifications,test$IPA_Ale))
+    # for each itirriation and K value capture the accuracy
+    masterAcc[j,i] = CM$overall[1]
+    }
+}
+# Find the mean for each ittiratio and K values.
+View(masterAcc)
+MeanAcc = colMeans(masterAcc)
+view(MeanAcc)
+# Identify which K
+which.max(MeanAcc)
+maxMeanAcc = max(MeanAcc)
+#Plot the Accuracy vs the K values
+plot(seq(1,numks,1),MeanAcc, type = "b" , 
+     main = "K values vs Accuracy",
+     xlab = "K Values", ylab = "Accuracy")
+# K= 5 is the optimal value to use for KNN
+classifications = knn(train[,c(4,5)],test[,c(4,5)],train$IPA_Ale, prob = TRUE, k = 5)
+    table(classifications,test$IPA_Ale)
+    CM = confusionMatrix(table(classifications,test$IPA_Ale))
+View(CM)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
